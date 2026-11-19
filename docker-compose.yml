@@ -1,0 +1,51 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  temporal:
+    image: temporalio/temporal:1.10.1      # dev server (in-memory persistence); pinned for reproducibility
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--ui-ip", "0.0.0.0"]
+    ports:
+      - "7233:7233"   # gRPC
+      - "8233:8233"   # Web UI -> http://localhost:8233
+    restart: unless-stopped
+
+  api:
+    build: .
+    ports: ["3000:3000"]
+    environment:
+      PORT: "3000"
+      REDIS_URL: redis://redis:6379
+      TEMPORAL_ADDRESS: temporal:7233
+      SUPPLIER_BASE_URL: http://localhost:3000   # mock suppliers live inside the API itself
+      ENABLE_FAILURE_INJECTION: "true"           # enables ?simulateDown=... (used by the Postman collection); keep false in real deployments
+    depends_on:
+      redis: { condition: service_healthy }
+      temporal: { condition: service_started }
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  worker:
+    build: .
+    command: ["node", "dist/temporal/worker.js"]
+    environment:
+      REDIS_URL: redis://redis:6379
+      TEMPORAL_ADDRESS: temporal:7233
+      SUPPLIER_BASE_URL: http://api:3000
+    depends_on:
+      redis: { condition: service_healthy }
+      temporal: { condition: service_started }
+      api: { condition: service_started }
+    restart: unless-stopped
