@@ -1,0 +1,26 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Install Redis and Temporal CLI
+        run: |
+          sudo apt-get update && sudo apt-get install -y redis-server
+          sudo systemctl stop redis-server || true
+          curl -sSL -o temporal.tgz https://github.com/temporalio/cli/releases/download/v1.3.0/temporal_cli_1.3.0_linux_amd64.tar.gz
+          tar xzf temporal.tgz temporal
+          echo "TEMPORAL_CLI_PATH=$PWD/temporal" >> "$GITHUB_ENV"
+      - run: npm test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose build
